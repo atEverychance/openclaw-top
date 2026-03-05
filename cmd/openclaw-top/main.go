@@ -189,10 +189,8 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case models.ViewStateAttach:
 		return m.handleAttachKeys(key)
 	case models.ViewStateHelp:
-		if key == "q" || key == "esc" || key == "?" {
-			m.app.View = models.ViewStateTable
-			return m, nil
-		}
+		// Any key exits help view
+		m.app.View = models.ViewStateTable
 		return m, nil
 	}
 
