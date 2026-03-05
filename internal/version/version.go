@@ -1,8 +1,10 @@
-// Package version provides build-time version information for openclaw-top.
 package version
 
+import (
+	"runtime/debug"
+)
+
 // These variables are set via ldflags during build.
-// For go install, they will have default values.
 var (
 	// Version is the semantic version of the binary.
 	Version = "dev"
@@ -11,6 +13,26 @@ var (
 	// Date is the build date.
 	Date = "unknown"
 )
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if Version == "dev" {
+			Version = info.Main.Version
+		}
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				if Commit == "unknown" {
+					Commit = setting.Value
+				}
+			case "vcs.time":
+				if Date == "unknown" {
+					Date = setting.Value
+				}
+			}
+		}
+	}
+}
 
 // Info returns formatted version information.
 func Info() string {
