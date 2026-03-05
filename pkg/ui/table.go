@@ -38,6 +38,7 @@ var (
 			Foreground(lipgloss.Color("255"))
 
 	selectedRowStyle = lipgloss.NewStyle().
+				Bold(true).
 				Foreground(lipgloss.Color("255")).
 				Background(lipgloss.Color("235"))
 
@@ -55,6 +56,15 @@ var (
 
 	doneStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("75")) // Blue
+
+	// Status icons
+	runningIcon = "🟢"
+	errorIcon   = "🔴"
+	idleIcon    = "🟡"
+	doneIcon    = "🔵"
+
+	// Sparkline characters (low to high)
+	sparkChars = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 )
 
 // NewTable creates a new table component
@@ -153,6 +163,9 @@ func (t *Table) View() string {
 
 func (t *Table) formatRow(s models.AgentSession, index, agentW, statusW, runtimeW, tokensW, taskW int) string {
 	tokensStr := formatTokens(s.TotalTokens)
+	progressBar := formatProgressBar(s.Runtime, t.sessions)
+	sparkline := formatSparkline(s.TotalTokens, t.sessions)
+	statusIcon := getStatusIcon(s.Status)
 
 	// Apply color based on status
 	statusStyle := rowStyle
@@ -175,12 +188,112 @@ func (t *Table) formatRow(s models.AgentSession, index, agentW, statusW, runtime
 		style = alternateRowStyle
 	}
 
+	// Format runtime with progress bar
+	runtimeDisplay := fmt.Sprintf("%s %s", progressBar, s.Runtime)
+
+	// Format tokens with sparkline
+	tokensDisplay := fmt.Sprintf("%s %s", sparkline, tokensStr)
+
 	return fmt.Sprintf("│ %s │ %s │ %s │ %s │ %s │",
-		style.Width(agentW-1).Render(truncate(s.AgentID, agentW-1)),
+		style.Width(agentW-1).Render(statusIcon+" "+truncate(s.AgentID, agentW-3)),
 		statusStyle.Width(statusW-1).Render(s.Status),
-		style.Width(runtimeW-1).Render(s.Runtime),
-		style.Width(tokensW-1).Render(tokensStr),
+		style.Width(runtimeW-1).Render(runtimeDisplay),
+		style.Width(tokensW-1).Render(tokensDisplay),
 		style.Width(taskW-1).Render(truncate(s.Task, taskW-1)))
+}
+
+// getStatusIcon returns the appropriate icon for a status
+func getStatusIcon(status string) string {
+	switch status {
+	case "RUNNING":
+		return runningIcon
+	case "ERROR":
+		return errorIcon
+	case "IDLE":
+		return idleIcon
+	case "DONE":
+		return doneIcon
+	default:
+		return "⚪"
+	}
+}
+
+// formatProgressBar creates a mini progress bar for runtime
+func formatProgressBar(runtime string, allSessions []models.AgentSession) string {
+	// Parse runtime to get relative value
+	currentMinutes := parseRuntimeMinutes(runtime)
+	maxMinutes := getMaxRuntime(allSessions)
+
+	if maxMinutes == 0 {
+		return "░░░░░░░░░░"
+	}
+
+	// Calculate progress (0-10 blocks)
+	progress := (currentMinutes * 10) / maxMinutes
+	if progress > 10 {
+		progress = 10
+	}
+
+	filled := strings.Repeat("█", progress)
+	empty := strings.Repeat("░", 10-progress)
+	return filled + empty
+}
+
+// parseRuntimeMinutes converts runtime string to minutes
+func parseRuntimeMinutes(runtime string) int {
+	var minutes, seconds int
+	fmt.Sscanf(runtime, "%dm %ds", &minutes, &seconds)
+	return minutes
+}
+
+// getMaxRuntime finds the maximum runtime in minutes
+func getMaxRuntime(sessions []models.AgentSession) int {
+	max := 0
+	for _, s := range sessions {
+		mins := parseRuntimeMinutes(s.Runtime)
+		if mins > max {
+			max = mins
+		}
+	}
+	return max
+}
+
+// formatSparkline creates a mini sparkline for token usage
+func formatSparkline(tokens int, allSessions []models.AgentSession) string {
+	if len(allSessions) == 0 {
+		return string(sparkChars[0])
+	}
+
+	// Find min and max tokens
+	minTokens, maxTokens := allSessions[0].TotalTokens, allSessions[0].TotalTokens
+	for _, s := range allSessions {
+		if s.TotalTokens < minTokens {
+			minTokens = s.TotalTokens
+		}
+		if s.TotalTokens > maxTokens {
+			maxTokens = s.TotalTokens
+		}
+	}
+
+	if maxTokens == minTokens {
+		return string(sparkChars[len(sparkChars)/2])
+	}
+
+	// Normalize tokens to sparkline range
+	rangeTokens := maxTokens - minTokens
+	if rangeTokens == 0 {
+		rangeTokens = 1
+	}
+
+	normalized := (tokens - minTokens) * (len(sparkChars) - 1) / rangeTokens
+	if normalized < 0 {
+		normalized = 0
+	}
+	if normalized >= len(sparkChars) {
+		normalized = len(sparkChars) - 1
+	}
+
+	return string(sparkChars[normalized])
 }
 
 func truncate(s string, maxLen int) string {
