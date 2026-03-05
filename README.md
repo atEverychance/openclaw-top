@@ -40,7 +40,10 @@ go build -o octop ./cmd/openclaw-top
 # Run the TUI
 openclaw-top
 
-# Or use the short alias
+# Show version info
+openclaw-top --version
+
+# Or use the short alias (if installed)
 octop
 ```
 

@@ -1,6 +1,6 @@
 # Binaries
-openclaw-top
-octop
+/openclaw-top
+/octop
 *.exe
 *.dll
 *.so
