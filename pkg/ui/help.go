@@ -58,18 +58,21 @@ Actions
   %s  %s
   %s  %s
   %s  %s
+  %s  %s
 
 Sorting
   %s  %s
 
-Press any key to close`,
+Press %s to close`,
 		helpTitleStyle.Render(" OpenClaw Agent Monitor "),
 		helpKeyStyle.Render("↑/k"), helpDescStyle.Render("Select next/previous agent"),
 		helpKeyStyle.Render("↓/j"), helpDescStyle.Render("Select next/previous agent"),
-		helpKeyStyle.Render("a"), helpDescStyle.Render("Attach to selected agent"),
-		helpKeyStyle.Render("x"), helpDescStyle.Render("Kill selected agent"),
+		helpKeyStyle.Render("a"), helpDescStyle.Render("Attach to selected agent (live logs)"),
+		helpKeyStyle.Render("l"), helpDescStyle.Render("View logs snapshot"),
+		helpKeyStyle.Render("k"), helpDescStyle.Render("Kill selected agent"),
 		helpKeyStyle.Render("r"), helpDescStyle.Render("Refresh agent list"),
-		helpKeyStyle.Render("1-4 / a,s,r,t"), helpDescStyle.Render("Sort by Agent/Status/Runtime/Tokens"))
+		helpKeyStyle.Render("1-4"), helpDescStyle.Render("Sort by column"),
+		helpKeyStyle.Render("q"))
 
 	return helpBoxStyle.Render(content)
 }

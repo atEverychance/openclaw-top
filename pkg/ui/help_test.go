@@ -28,7 +28,10 @@ func TestHelpOverlayContainsRequiredText(t *testing.T) {
 	
 	required := []string{
 		"Select next/previous agent",
-		"Sort by Agent/Status/Runtime/Tokens",
+		"Sort by column",
+		"Attach to selected agent",
+		"View logs snapshot",
+		"Kill selected agent",
 	}
 	
 	for _, phrase := range required {
