@@ -21,7 +21,28 @@
 ### Using `go install` (recommended)
 
 ```bash
-go install github.com/ateverychance/openclaw-top@latest
+# Install the binary directly
+go install github.com/ateverychance/openclaw-top/cmd/openclaw-top@latest
+```
+
+This will install `openclaw-top` to your `$GOPATH/bin` directory.
+
+### Using the alias `octop`
+
+To install with the shorter `octop` binary name:
+
+```bash
+# Build and install as octop
+git clone https://github.com/ateverychance/openclaw-top.git
+cd openclaw-top
+make install-alias
+```
+
+Or manually:
+
+```bash
+go build -o octop ./cmd/openclaw-top
+sudo mv octop /usr/local/bin/
 ```
 
 ### From source
@@ -29,7 +50,17 @@ go install github.com/ateverychance/openclaw-top@latest
 ```bash
 git clone https://github.com/ateverychance/openclaw-top.git
 cd openclaw-top
-go build -o octop ./cmd/openclaw-top
+make build
+```
+
+### Using Makefile
+
+```bash
+make build          # Build binary with version info
+make install        # Install to GOPATH/bin
+make install-alias   # Install as 'octop'
+make test           # Run tests
+make clean          # Clean build artifacts
 ```
 
 ## 🚀 Usage
