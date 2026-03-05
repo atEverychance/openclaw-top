@@ -68,6 +68,11 @@ func (a *AttachView) SetDimensions(width, height int) {
 // streamLogs streams log data from the session
 func (a *AttachView) streamLogs() tea.Cmd {
 	return func() tea.Msg {
+		// Safety check - if context is nil, we're not properly initialized
+		if a == nil || a.ctx == nil {
+			return nil
+		}
+
 		// For now, poll logs every second
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -77,6 +82,10 @@ func (a *AttachView) streamLogs() tea.Cmd {
 			case <-a.ctx.Done():
 				return nil
 			case <-ticker.C:
+				// Safety check before fetching logs
+				if a == nil || a.ctx == nil || a.ctx.Err() != nil {
+					return nil
+				}
 				// Try to get new logs
 				logs, err := a.fetchLogs()
 				if err == nil && logs != "" {

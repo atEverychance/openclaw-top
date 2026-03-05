@@ -230,6 +230,11 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		if m.app.Selected >= 0 && m.app.Selected < len(m.app.Sessions) {
 			session := m.app.Sessions[m.app.Selected]
+			// Only allow attach on RUNNING sessions (not IDLE or ERROR)
+			if session.Status != "RUNNING" {
+				m.statusBar.SetMessage(fmt.Sprintf("Cannot attach to %s agent (not running)", session.Status))
+				return m, nil
+			}
 			m.attachView.SetSession(session.AgentID, session.AgentID)
 			m.app.View = models.ViewStateAttach
 			return m, m.attachView.Init()
