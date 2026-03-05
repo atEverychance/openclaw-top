@@ -11,9 +11,11 @@ import (
 
 // StatusBar displays agent stats at the bottom
 type StatusBar struct {
-	width  int
-	stats  *models.AppStats
-	height int
+	width   int
+	stats   *models.AppStats
+	height  int
+	message string
+	err     error
 }
 
 var (
@@ -47,19 +49,50 @@ func (s *StatusBar) SetStats(stats *models.AppStats) {
 	s.stats = stats
 }
 
+// SetMessage sets a status message
+func (s *StatusBar) SetMessage(msg string) {
+	s.message = msg
+	s.err = nil
+}
+
+// SetError sets an error to display
+func (s *StatusBar) SetError(err error) {
+	s.err = err
+	s.message = ""
+}
+
 // View renders the status bar
 func (s *StatusBar) View() string {
+	// Show error if present
+	if s.err != nil {
+		errStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("255")).
+			Background(lipgloss.Color("196")).
+			Width(s.width)
+		msg := fmt.Sprintf(" Error: %s ", s.err.Error())
+		return errStyle.Render(msg)
+	}
+
+	// Show message if present
+	if s.message != "" {
+		msgStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("255")).
+			Background(lipgloss.Color("28")).
+			Width(s.width)
+		return msgStyle.Render(fmt.Sprintf(" %s ", s.message))
+	}
+
 	if s.stats == nil {
 		return statusStyle.Width(s.width).Render(" Initializing... ")
 	}
 
 	agentStr := fmt.Sprintf(" %d agents ", s.stats.TotalAgents)
 	refreshStr := fmt.Sprintf(" Last refresh: %s ", formatRefreshTime(s.stats.LastRefresh))
-	
+
 	// Build the status string
 	parts := []string{agentStr, refreshStr}
 	status := strings.Join(parts, "|")
-	
+
 	// Pad to full width
 	padding := s.width - lipgloss.Width(status) - 2
 	if padding > 0 {

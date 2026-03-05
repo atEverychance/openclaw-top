@@ -29,14 +29,19 @@ var (
 
 type Client interface {
 	FetchAll() (*models.AppStats, []models.AgentSession, error)
+	KillSession(sessionID string) error
+	GetLogs(sessionID string, lines int) (string, error)
 }
 
 type model struct {
-	table      *ui.Table
-	statusBar  *ui.StatusBar
-	help       *ui.HelpOverlay
-	client     Client
-	app        *models.AppModel
+	table       *ui.Table
+	statusBar   *ui.StatusBar
+	help        *ui.HelpOverlay
+	confirm     *ui.ConfirmModal
+	logViewer   *ui.LogViewer
+	client      Client
+	app         *models.AppModel
+	logContent  string
 }
 
 func initialModel() *model {
@@ -47,6 +52,8 @@ func initialModel() *model {
 		table:     ui.NewTable(),
 		statusBar: ui.NewStatusBar(),
 		help:      ui.NewHelpOverlay(),
+		confirm:   ui.NewConfirmModal(),
+		logViewer: ui.NewLogViewer(),
 		client:    client,
 		app:       app,
 	}
@@ -64,9 +71,44 @@ func (m *model) fetchData() tea.Msg {
 	return DataMsg{Stats: stats, Sessions: sessions}
 }
 
+func (m *model) killAgent() tea.Msg {
+	if m.app.Selected < 0 || m.app.Selected >= len(m.app.Sessions) {
+		return fmt.Errorf("no agent selected")
+	}
+	
+	session := m.app.Sessions[m.app.Selected]
+	err := m.client.KillSession(session.AgentID)
+	if err != nil {
+		return fmt.Errorf("kill failed: %v", err)
+	}
+	return KillSuccessMsg{AgentID: session.AgentID}
+}
+
+func (m *model) fetchLogs() tea.Msg {
+	if m.app.Selected < 0 || m.app.Selected >= len(m.app.Sessions) {
+		return fmt.Errorf("no agent selected")
+	}
+	
+	session := m.app.Sessions[m.app.Selected]
+	logs, err := m.client.GetLogs(session.AgentID, 100)
+	if err != nil {
+		return fmt.Errorf("fetch logs failed: %v", err)
+	}
+	return LogsMsg{Content: logs, AgentID: session.AgentID}
+}
+
 type DataMsg struct {
 	Stats    *models.AppStats
 	Sessions []models.AgentSession
+}
+
+type KillSuccessMsg struct {
+	AgentID string
+}
+
+type LogsMsg struct {
+	Content string
+	AgentID string
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -86,6 +128,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return TickMsg{}
 		})
 
+	case KillSuccessMsg:
+		m.confirm.Reset()
+		m.app.View = models.ViewStateTable
+		m.statusBar.SetMessage(fmt.Sprintf("✓ Killed agent %s", msg.AgentID))
+		return m, m.fetchData
+
+	case LogsMsg:
+		m.logContent = msg.Content
+		m.logViewer.SetContent(msg.Content)
+		m.logViewer.SetTitle(fmt.Sprintf("Logs: %s", msg.AgentID))
+		m.app.View = models.ViewStateLogs
+		return m, nil
+
+	case error:
+		m.statusBar.SetError(msg)
+		return m, nil
+
 	case TickMsg:
 		// Auto-refresh triggered
 		return m, m.fetchData
@@ -94,6 +153,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	default:
+		// Handle log viewer updates
+		if m.app.View == models.ViewStateLogs {
+			_, cmd := m.logViewer.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	}
 }
@@ -103,27 +167,60 @@ type TickMsg struct{}
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Handle view-specific keys first
+	switch m.app.View {
+	case models.ViewStateConfirm:
+		return m.handleConfirmKeys(key)
+	case models.ViewStateLogs:
+		return m.handleLogKeys(key)
+	case models.ViewStateHelp:
+		if key == "q" || key == "esc" || key == "?" {
+			m.app.View = models.ViewStateTable
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Table view keys
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
 	case "?":
-		if m.app.View == models.ViewStateHelp {
-			m.app.View = models.ViewStateTable
-		} else {
-			m.app.View = models.ViewStateHelp
-		}
+		m.app.View = models.ViewStateHelp
 
 	case "r":
 		return m, m.fetchData
 
-	case "up", "k":
+	case "k":
+		if m.app.Selected >= 0 && m.app.Selected < len(m.app.Sessions) {
+			session := m.app.Sessions[m.app.Selected]
+			if session.Status == "RUNNING" {
+				m.confirm.SetMessage(fmt.Sprintf("Kill agent %s?", session.AgentID))
+				m.confirm.SetDetails(ui.FormatAgentDetails(
+					session.AgentID,
+					session.Status,
+					session.Runtime,
+					session.TotalTokens,
+				))
+				m.app.View = models.ViewStateConfirm
+			} else {
+				m.statusBar.SetMessage("Cannot kill: agent is not running")
+			}
+		}
+
+	case "l":
+		if m.app.Selected >= 0 && m.app.Selected < len(m.app.Sessions) {
+			return m, m.fetchLogs
+		}
+
+	case "up":
 		if m.app.Selected > 0 {
 			m.app.Selected--
 			m.table.SetSelected(m.app.Selected)
 		}
 
-	case "down", "j":
+	case "down":
 		if m.app.Selected < len(m.app.Sessions)-1 {
 			m.app.Selected++
 			m.table.SetSelected(m.app.Selected)
@@ -153,6 +250,39 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) handleConfirmKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "y", "Y":
+		m.confirm.Confirm()
+		return m, m.killAgent
+	case "n", "N", "q", "esc":
+		m.confirm.Cancel()
+		m.confirm.Reset()
+		m.app.View = models.ViewStateTable
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *model) handleLogKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "esc":
+		m.app.View = models.ViewStateTable
+		return m, nil
+	case "up", "k":
+		m.logViewer.ScrollUp()
+	case "down", "j":
+		m.logViewer.ScrollDown()
+	case "pgup":
+		m.logViewer.PageUp()
+	case "pgdown":
+		m.logViewer.PageDown()
+	case "end", "G":
+		m.logViewer.GotoBottom()
+	}
+	return m, nil
+}
+
 func (m *model) updateLayout() {
 	tableHeight := m.app.Height - statusBarHeight - 2 // Account for borders
 	if tableHeight < 1 {
@@ -161,6 +291,8 @@ func (m *model) updateLayout() {
 	m.table.SetDimensions(m.app.Width, tableHeight)
 	m.statusBar.SetDimensions(m.app.Width)
 	m.help.SetDimensions(m.app.Width, m.app.Height)
+	m.confirm.SetDimensions(m.app.Width, m.app.Height)
+	m.logViewer.SetDimensions(m.app.Width, m.app.Height)
 }
 
 func (m *model) View() string {
@@ -168,20 +300,45 @@ func (m *model) View() string {
 		return fmt.Sprintf("Terminal too small (min %dx%d)", minWidth, minHeight)
 	}
 
-	if m.app.View == models.ViewStateHelp {
-		helpView := m.help.View()
-		helpHeight := lipgloss.Height(helpView)
-		helpWidth := lipgloss.Width(helpView)
-		topPadding := (m.app.Height - helpHeight) / 2
-		leftPadding := (m.app.Width - helpWidth) / 2
-		return lipgloss.PlaceVertical(topPadding, lipgloss.Top,
-			lipgloss.PlaceHorizontal(leftPadding, lipgloss.Left, helpView))
+	switch m.app.View {
+	case models.ViewStateHelp:
+		return m.renderHelpView()
+	case models.ViewStateConfirm:
+		return m.renderConfirmView()
+	case models.ViewStateLogs:
+		return m.renderLogView()
+	default:
+		return m.renderTableView()
 	}
+}
 
-	// Render main view: table + status bar
+func (m *model) renderHelpView() string {
+	helpView := m.help.View()
+	helpHeight := lipgloss.Height(helpView)
+	helpWidth := lipgloss.Width(helpView)
+	topPadding := (m.app.Height - helpHeight) / 2
+	leftPadding := (m.app.Width - helpWidth) / 2
+	return lipgloss.PlaceVertical(topPadding, lipgloss.Top,
+		lipgloss.PlaceHorizontal(leftPadding, lipgloss.Left, helpView))
+}
+
+func (m *model) renderConfirmView() string {
+	confirmView := m.confirm.View()
+	confirmHeight := lipgloss.Height(confirmView)
+	confirmWidth := lipgloss.Width(confirmView)
+	topPadding := (m.app.Height - confirmHeight) / 2
+	leftPadding := (m.app.Width - confirmWidth) / 2
+	return lipgloss.PlaceVertical(topPadding, lipgloss.Top,
+		lipgloss.PlaceHorizontal(leftPadding, lipgloss.Left, confirmView))
+}
+
+func (m *model) renderLogView() string {
+	return m.logViewer.View()
+}
+
+func (m *model) renderTableView() string {
 	tableView := m.table.View()
 	statusView := m.statusBar.View()
-
 	return tableView + "\n" + borderStyle.Width(m.app.Width).Render(statusView)
 }
 

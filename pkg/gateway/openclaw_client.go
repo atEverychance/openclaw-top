@@ -92,6 +92,66 @@ func (c *OpenClawClient) FetchAll() (*models.AppStats, []models.AgentSession, er
 	return stats, sessions, nil
 }
 
+// KillSession kills a session by ID
+func (c *OpenClawClient) KillSession(sessionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// First try to find the session key from the sessionID
+	sessions, err := c.FetchSessions()
+	if err != nil {
+		return fmt.Errorf("failed to fetch sessions: %w", err)
+	}
+
+	var targetKey string
+	for _, s := range sessions {
+		if s.AgentID == sessionID {
+			targetKey = s.AgentID
+			break
+		}
+	}
+
+	if targetKey == "" {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	// Try to kill via openclaw CLI
+	cmd := exec.CommandContext(ctx, "openclaw", "sessions", "kill", targetKey)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to kill session: %w (output: %s)", err, string(output))
+	}
+
+	return nil
+}
+
+// GetLogs retrieves logs for a session
+func (c *OpenClawClient) GetLogs(sessionID string, lines int) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if lines <= 0 {
+		lines = 100
+	}
+
+	// Try to get logs via openclaw CLI
+	cmd := exec.CommandContext(ctx, "openclaw", "sessions", "logs", sessionID, "--lines", fmt.Sprintf("%d", lines))
+	output, err := cmd.Output()
+	if err != nil {
+		// Fallback: try to read from log files directly
+		return c.getLogsFromFile(sessionID, lines)
+	}
+
+	return string(output), nil
+}
+
+// getLogsFromFile attempts to read logs from file system
+func (c *OpenClawClient) getLogsFromFile(sessionID string, lines int) (string, error) {
+	// This is a fallback that looks for log files in common locations
+	// In a real implementation, this would look in ~/.openclaw/sessions/ etc.
+	return fmt.Sprintf("Logs not available via CLI for session %s\n(Fallback file reading not implemented)", sessionID), nil
+}
+
 // deriveStatus determines status from OpenClaw session data
 func deriveStatus(active bool, ageMs int64) string {
 	if !active {

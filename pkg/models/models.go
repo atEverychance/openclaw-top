@@ -24,6 +24,8 @@ type ViewState int
 const (
 	ViewStateTable ViewState = iota
 	ViewStateHelp
+	ViewStateConfirm
+	ViewStateLogs
 )
 
 // AppModel is the main application model
