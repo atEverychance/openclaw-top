@@ -39,6 +39,7 @@ type model struct {
 	help        *ui.HelpOverlay
 	confirm     *ui.ConfirmModal
 	logViewer   *ui.LogViewer
+	attachView  *ui.AttachView
 	client      Client
 	app         *models.AppModel
 	logContent  string
@@ -49,13 +50,14 @@ func initialModel() *model {
 	app := models.NewAppModel()
 
 	return &model{
-		table:     ui.NewTable(),
-		statusBar: ui.NewStatusBar(),
-		help:      ui.NewHelpOverlay(),
-		confirm:   ui.NewConfirmModal(),
-		logViewer: ui.NewLogViewer(),
-		client:    client,
-		app:       app,
+		table:      ui.NewTable(),
+		statusBar:  ui.NewStatusBar(),
+		help:       ui.NewHelpOverlay(),
+		confirm:    ui.NewConfirmModal(),
+		logViewer:  ui.NewLogViewer(),
+		attachView: ui.NewAttachView(),
+		client:     client,
+		app:        app,
 	}
 }
 
@@ -141,6 +143,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.app.View = models.ViewStateLogs
 		return m, nil
 
+	case ui.LogUpdateMsg:
+		// Handle live log updates in attach mode
+		_, cmd := m.attachView.Update(msg)
+		return m, cmd
+
 	case error:
 		m.statusBar.SetError(msg)
 		return m, nil
@@ -158,6 +165,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_, cmd := m.logViewer.Update(msg)
 			return m, cmd
 		}
+		// Handle attach view updates
+		if m.app.View == models.ViewStateAttach {
+			_, cmd := m.attachView.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	}
 }
@@ -173,6 +185,8 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKeys(key)
 	case models.ViewStateLogs:
 		return m.handleLogKeys(key)
+	case models.ViewStateAttach:
+		return m.handleAttachKeys(key)
 	case models.ViewStateHelp:
 		if key == "q" || key == "esc" || key == "?" {
 			m.app.View = models.ViewStateTable
@@ -212,6 +226,14 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l":
 		if m.app.Selected >= 0 && m.app.Selected < len(m.app.Sessions) {
 			return m, m.fetchLogs
+		}
+
+	case "a":
+		if m.app.Selected >= 0 && m.app.Selected < len(m.app.Sessions) {
+			session := m.app.Sessions[m.app.Selected]
+			m.attachView.SetSession(session.AgentID, session.AgentID)
+			m.app.View = models.ViewStateAttach
+			return m, m.attachView.Init()
 		}
 
 	case "up":
@@ -283,6 +305,26 @@ func (m *model) handleLogKeys(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) handleAttachKeys(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q", "esc":
+		m.attachView.Stop()
+		m.app.View = models.ViewStateTable
+		return m, nil
+	case "up":
+		m.attachView.ScrollUp()
+	case "down":
+		m.attachView.ScrollDown()
+	case "pgup":
+		m.attachView.PageUp()
+	case "pgdown":
+		m.attachView.PageDown()
+	case "end", "G":
+		m.attachView.GotoBottom()
+	}
+	return m, nil
+}
+
 func (m *model) updateLayout() {
 	tableHeight := m.app.Height - statusBarHeight - 2 // Account for borders
 	if tableHeight < 1 {
@@ -293,6 +335,7 @@ func (m *model) updateLayout() {
 	m.help.SetDimensions(m.app.Width, m.app.Height)
 	m.confirm.SetDimensions(m.app.Width, m.app.Height)
 	m.logViewer.SetDimensions(m.app.Width, m.app.Height)
+	m.attachView.SetDimensions(m.app.Width, m.app.Height)
 }
 
 func (m *model) View() string {
@@ -307,6 +350,8 @@ func (m *model) View() string {
 		return m.renderConfirmView()
 	case models.ViewStateLogs:
 		return m.renderLogView()
+	case models.ViewStateAttach:
+		return m.renderAttachView()
 	default:
 		return m.renderTableView()
 	}
@@ -334,6 +379,10 @@ func (m *model) renderConfirmView() string {
 
 func (m *model) renderLogView() string {
 	return m.logViewer.View()
+}
+
+func (m *model) renderAttachView() string {
+	return m.attachView.View()
 }
 
 func (m *model) renderTableView() string {

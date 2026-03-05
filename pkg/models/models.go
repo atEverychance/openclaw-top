@@ -26,6 +26,7 @@ const (
 	ViewStateHelp
 	ViewStateConfirm
 	ViewStateLogs
+	ViewStateAttach
 )
 
 // AppModel is the main application model
