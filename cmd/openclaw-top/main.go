@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ateverychance/openclaw-top/internal/version"
 	"github.com/ateverychance/openclaw-top/pkg/gateway"
@@ -394,6 +395,10 @@ func (m *model) renderTableView() string {
 func main() {
 	// Parse flags
 	showVersion := flag.Bool("version", false, "Print version information and exit")
+	attachAgent := flag.String("attach", "", "Attach to specific agent immediately (non-interactive)")
+	killAgent := flag.String("kill", "", "Kill specific agent and exit (non-interactive)")
+	watchMode := flag.Bool("watch", false, "Watch mode: stream updates without interactive TUI")
+	refreshRate := flag.Int("refresh", 2, "Refresh interval in seconds (default: 2)")
 	flag.Parse()
 
 	if *showVersion {
@@ -401,7 +406,134 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle non-interactive modes
+	if *attachAgent != "" {
+		os.Exit(attachToAgent(*attachAgent, *refreshRate))
+	}
+
+	if *killAgent != "" {
+		os.Exit(killAgentByID(*killAgent))
+	}
+
+	if *watchMode {
+		os.Exit(watchModeRun(*refreshRate))
+	}
+
 	run()
+}
+
+// attachToAgent attaches to a specific agent and streams logs
+func attachToAgent(agentID string, refreshRate int) int {
+	client := gateway.NewOpenClawClient()
+
+	// Verify agent exists
+	_, sessions, err := client.FetchAll()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error fetching sessions: %v\n", err)
+		return 1
+	}
+
+	var targetSession *models.AgentSession
+	for i := range sessions {
+		if sessions[i].AgentID == agentID {
+			targetSession = &sessions[i]
+			break
+		}
+	}
+
+	if targetSession == nil {
+		fmt.Fprintf(os.Stderr, "Agent not found: %s\n", agentID)
+		return 2
+	}
+
+	if targetSession.Status != "RUNNING" {
+		fmt.Fprintf(os.Stderr, "Agent is not running: %s (status: %s)\n", agentID, targetSession.Status)
+		return 2
+	}
+
+	fmt.Printf("Attaching to agent %s...\n", agentID)
+	fmt.Println("Press Ctrl+C to exit")
+	fmt.Println()
+
+	// Simple polling loop for logs
+	ticker := time.NewTicker(time.Duration(refreshRate) * time.Second)
+	defer ticker.Stop()
+
+	var lastContent string
+	for range ticker.C {
+		logs, err := client.GetLogs(agentID, 50)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching logs: %v\n", err)
+			return 3
+		}
+
+		// Only print new content
+		if logs != lastContent {
+			fmt.Print(logs)
+			lastContent = logs
+		}
+	}
+
+	return 0
+}
+
+// killAgentByID kills a specific agent by ID
+func killAgentByID(agentID string) int {
+	client := gateway.NewOpenClawClient()
+
+	err := client.KillSession(agentID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to kill agent %s: %v\n", agentID, err)
+		return 3
+	}
+
+	fmt.Printf("✓ Killed agent %s\n", agentID)
+	return 0
+}
+
+// watchModeRun runs in watch mode (streaming updates)
+func watchModeRun(refreshRate int) int {
+	client := gateway.NewOpenClawClient()
+
+	fmt.Println("openclaw-top -- Watch Mode")
+	fmt.Println("Press Ctrl+C to exit")
+	fmt.Println()
+
+	ticker := time.NewTicker(time.Duration(refreshRate) * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		stats, sessions, err := client.FetchAll()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			continue
+		}
+
+		// Clear screen (simple approach)
+		fmt.Print("\033[2J\033[H")
+
+		fmt.Printf("Agents: %d | Refresh: %s\n", stats.TotalAgents, time.Now().Format("15:04:05"))
+		fmt.Println(strings.Repeat("-", 80))
+		fmt.Printf("%-20s %-10s %-12s %-10s\n", "AGENT", "STATUS", "RUNTIME", "TOKENS")
+		fmt.Println(strings.Repeat("-", 80))
+
+		for _, s := range sessions {
+			fmt.Printf("%-20s %-10s %-12s %-10d\n",
+				truncate(s.AgentID, 20),
+				s.Status,
+				s.Runtime,
+				s.TotalTokens)
+		}
+	}
+
+	return 0
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 func run() {
